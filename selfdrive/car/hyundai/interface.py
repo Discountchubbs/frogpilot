@@ -30,7 +30,6 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params(ret, candidate, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs):
     use_new_api = params.get_bool("NewLongAPI")
-    params = Params()
     ret.carName = "hyundai"
     ret.radarUnavailable = RADAR_START_ADDR not in fingerprint[1] or DBC[ret.carFingerprint]["radar"] is None
     ret.customStockLongAvailable = True
@@ -284,6 +283,15 @@ class CarInterface(CarInterfaceBase):
 
   def _update(self, c, frogpilot_toggles):
     ret, fp_ret = self.CS.update(self.cp, self.cp_cam, frogpilot_toggles)
+    self.CS.accEnabled = self.get_cp_v_cruise_non_pcm_state(ret, c.vCruise, self.CS.accEnabled)
+    if ret.cruiseState.available:
+      if not self.CP.pcmCruiseSpeed:
+        if any(b.type in (ButtonType.altButton3, ButtonType.cancel) and not b.pressed for b in self.CS.button_events):
+          self.CS.accEnabled = True
+      ret = self.get_cp_common_state(ret)
+
+
+
 
     if self.CS.CP.openpilotLongitudinalControl:
       ret.buttonEvents = [
@@ -292,7 +300,6 @@ class CarInterface(CarInterfaceBase):
       ]
     else:
       ret.buttonEvents = create_button_events(self.CS.lkas_enabled, self.CS.lkas_previously_enabled, {1: FrogPilotButtonType.lkas})
-
 
 
     # On some newer model years, the CANCEL button acts as a pause/resume button based on the PCM state

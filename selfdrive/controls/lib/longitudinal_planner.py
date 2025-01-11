@@ -256,6 +256,11 @@ class LongitudinalPlanner:
 
     if force_slow_decel:
       v_cruise = 0.0
+
+    v_cruise = self.cruise_solutions(
+      not reset_state and (self.CP.openpilotLongitudinalControl or not self.CP.pcmCruiseSpeed),
+      self.v_desired_filter.x, self.a_desired, v_cruise, sm)
+
     # clip limits, cannot init MPC outside of bounds
     accel_limits_turns[0] = min(accel_limits_turns[0], self.a_desired + 0.05)
     accel_limits_turns[1] = max(accel_limits_turns[1], self.a_desired - 0.05)

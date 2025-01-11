@@ -1,14 +1,20 @@
+from openpilot.common.numpy_fast import clip, interp
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.realtime import DT_CTRL
-from openpilot.selfdrive.car.hyundai.values import HyundaiFlags, Buttons, CANFD_CAR, LEGACY_SAFETY_MODE_CAR
-from openpilot.selfdrive.car import make_can_msg
+from openpilot.selfdrive.car.hyundai.values import HyundaiFlags, Buttons, CANFD_CAR, LEGACY_SAFETY_MODE_CAR, CarControllerParams
 from openpilot.selfdrive.car.hyundai import hyundaicanfd, hyundaican
+from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 
+from openpilot.selfdrive.car.hyundai.hkg_additions import JerkLimiter
 from openpilot.selfdrive.frogpilot.controls.frogpilot_planner import FrogPilotPlanner
+from openpilot.selfdrive.frogpilot.controls.lib.frogpilot_acceleration import get_max_allowed_accel
 
 class CustomStockLongitudinal:
   def __init__(self):
     self.frogpilot_planner = FrogPilotPlanner()
+    self.jerk_limiter = JerkLimiter()
+
+    # Button control variables
     self.timer = 0
     self.button_type = 0
     self.button_count = 0
@@ -16,6 +22,14 @@ class CustomStockLongitudinal:
     self.cruise_button = None
     self.last_button_frame = 0
     self.frame = 0
+
+    # State tracking
+    self.road_curvature_detected = False
+    self.v_set_dis = 0
+    self.target_speed = 0
+    self.v_tsc_state = 0
+    self.m_tsc_state = 0
+    self.traffic_mode_active = False
 
   def get_cruise_buttons_status(self, CS):
     if not CS.out.cruiseState.enabled or CS.cruise_buttons[-1] != Buttons.NONE:
@@ -62,15 +76,36 @@ class CustomStockLongitudinal:
 
   def update_custom_stock_long(self, car_fingerprint, frame, CS, packer, CP=None):
     self.frame = frame
+    self.target_speed = CS.out.cruiseState.speed
 
     if not CS.out.cruiseState.enabled or not self.get_cruise_buttons_status(CS):
       return []
 
-    v_cruise_target = self.frogpilot_planner.v_cruise * CV.MS_TO_KPH
+    if self.frogpilot_planner.sm.updated['frogpilotPlan']:
+      fp = self.frogpilot_planner.sm['frogpilotPlan']
+      self.road_curvature_detected = fp.vtscControllingCurve
+      self.traffic_mode_active = fp.trafficModeActive
+      self.v_tsc_state = fp.vtscSpeed
+      self.m_tsc_state = fp.mtscSpeed
+      self.speed_limit = fp.slcSpeedLimit
+
+    MS_CONVERT = CV.MS_TO_KPH if CS.params_list.is_metric else CV.MS_TO_MPH
+    v_cruise_target = round(self.frogpilot_planner.v_cruise * MS_CONVERT)
+    self.v_set_dis = round(CS.out.cruiseState.speed * MS_CONVERT)
+
     self.cruise_button = self.get_button_type(CS, v_cruise_target)
 
     if self.cruise_button is None:
-      return []
+        return []
+
+    if (self.jerk_limiter.hkg_tuning and CP) or self.frogpilot_planner.sport_plus:
+      if self.frogpilot_planner.sport_plus:
+        accel = min(self.frogpilot_planner.max_desired_acceleration, get_max_allowed_accel(CS.out.vEgo))
+      else:
+        accel = min(self.frogpilot_planner.max_desired_acceleration, CarControllerParams.ACCEL_MAX)
+
+      if accel < 0 or self.jerk_limiter.using_e2e:
+        accel = self.jerk_limiter.calculate_limited_accel(accel, CS, LongCtrlState, interp, clip)
 
     # Handle CAN-FD vehicles
     if car_fingerprint in CANFD_CAR:
@@ -82,15 +117,22 @@ class CustomStockLongitudinal:
                 ((self.frame // 2) + 1) % 0x10, self.cruise_button)]
 
     # Handle regular CAN vehicles
-    elif car_fingerprint in LEGACY_SAFETY_MODE_CAR:
-      send_freq = 5 if not self.frogpilot_planner.road_curvature_detected else 1
+    else:
+      if car_fingerprint in LEGACY_SAFETY_MODE_CAR:
+        # Adjust frequency based on traffic mode and road curvature
+        traffic_factor = 2 if self.traffic_mode_active else 1
+        base_freq = 5 if abs(v_cruise_target - self.v_set_dis) <= 2 else 1
+        send_freq = base_freq * traffic_factor
 
-      if (frame - self.last_button_frame) * DT_CTRL > 0.1 * send_freq:
-        messages = [hyundaican.create_clu11(packer, frame, CS.clu11, self.cruise_button)] * 25
+        if (frame - self.last_button_frame) * DT_CTRL > 0.1 * send_freq:
+          messages = [hyundaican.create_clu11(packer, frame, CS.clu11, self.cruise_button)] * 25
 
-        if (frame - self.last_button_frame) * DT_CTRL >= 0.15 * send_freq:
-          self.last_button_frame = frame
+          if (frame - self.last_button_frame) * DT_CTRL >= 0.15 * send_freq:
+            self.last_button_frame = frame
 
-        return messages
+          return messages
+      else:
+        if self.frame % 2 == 0:
+          return [hyundaican.create_clu11(packer, (self.frame // 2) + 1, CS.clu11, self.cruise_button)] * 25
 
     return []

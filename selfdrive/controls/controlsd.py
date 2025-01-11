@@ -559,7 +559,7 @@ class Controls:
           else:
             self.state = State.enabled
           self.current_alert_types.append(ET.ENABLE)
-          self.v_cruise_helper.initialize_v_cruise(CS, self.experimental_mode, self.sm['frogpilotPlan'].unconfirmedSlcSpeedLimit, self.frogpilot_toggles)
+          self.v_cruise_helper.initialize_v_cruise(CS, self.is_metric, self.experimental_mode, self.sm['frogpilotPlan'].unconfirmedSlcSpeedLimit, self.frogpilot_toggles)
 
     # Check if openpilot is engaged and actuators are enabled
     self.enabled = self.state in ENABLED_STATES
@@ -954,7 +954,7 @@ class Controls:
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and (self.CP.openpilotLongitudinalControl or
-                                                                             (not self.CP.pcmCruiseSpeed and self.custom_stock_planner_speed))
+                                                                             (self.custom_stock_planner_speed))
       self.personality = self.read_personality_param()
       if self.CP.notCar:
         self.joystick_mode = self.params.get_bool("JoystickDebugMode")

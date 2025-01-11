@@ -200,21 +200,20 @@ void TogglesPanel::updateToggles() {
     }
     op_long_toggle->setVisible(CP.getExperimentalLongitudinalAvailable());
 
-    if (!CP.getCustomStockLongAvailable()) {
-      params.remove("CustomStockLong");
-    }
-    custom_stock_long_toggle->setVisible(CP.getCustomStockLongAvailable());
 
     if (hasLongitudinalControl(CP)) {
       // normal description and toggle
       experimental_mode_toggle->setEnabled(true);
       experimental_mode_toggle->setDescription(e2e_description);
       long_personality_setting->setEnabled(true);
+      op_long_toggle->setEnabled(true);
       custom_stock_long_toggle->setEnabled(false);
       custom_stock_long_planner->setEnabled(false);
+      params.remove("CustomStockLong");
     } else if (params.getBool("CustomStockLong")) {
       op_long_toggle->setEnabled(false);
-
+      custom_stock_long_toggle->setEnabled(CP.getCustomStockLongAvailable());
+      experimental_mode_toggle->setEnabled(params.getBool("CustomStockLongPlanner"));
       bool planner_enabled = params.getBool("CustomStockLongPlanner");
       experimental_mode_toggle->setEnabled(planner_enabled);
       experimental_mode_toggle->setDescription(e2e_description);
@@ -224,6 +223,7 @@ void TogglesPanel::updateToggles() {
       if (!planner_enabled) {
           params.remove("ExperimentalMode");
       }
+      params.remove("ExperimentalLongitudinalEnabled");
     } else {
       // no long for now
       experimental_mode_toggle->setEnabled(false);
@@ -237,7 +237,10 @@ void TogglesPanel::updateToggles() {
       if (CP.getExperimentalLongitudinalAvailable()) {
         long_desc = tr("Enable the openpilot longitudinal control (alpha) toggle to allow Experimental mode.");
       }
+      op_long_toggle->setEnabled(CP.getExperimentalLongitudinalAvailable());
       experimental_mode_toggle->setDescription("<b>" + long_desc + "</b><br><br>" + e2e_description);
+      custom_stock_long_toggle->setEnabled(CP.getCustomStockLongAvailable());
+      custom_stock_long_planner->setEnabled(false);
     }
 
     experimental_mode_toggle->refresh();

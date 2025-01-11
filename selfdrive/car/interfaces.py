@@ -20,7 +20,7 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
 from openpilot.selfdrive.car.hyundai.hkg_additions import ParamManager
 from openpilot.selfdrive.car.values import PLATFORMS
-from openpilot.selfdrive.controls.lib.drive_helpers import CRUISE_LONG_PRESS, V_CRUISE_MAX, get_friction
+from openpilot.selfdrive.controls.lib.drive_helpers import CRUISE_LONG_PRESS, V_CRUISE_MAX, V_CRUISE_UNSET, get_friction
 from openpilot.selfdrive.controls.lib.events import Events
 from openpilot.selfdrive.controls.lib.vehicle_model import VehicleModel
 
@@ -514,6 +514,34 @@ class CarInterfaceBase(ABC):
         events.add(EventName.pcmDisable)
 
     return events
+
+  @staticmethod
+  def cp_v_cruise_initialized(v_cruise):
+    return v_cruise != V_CRUISE_UNSET
+
+  def get_cp_v_cruise_non_pcm_state(self, cs_out, vCruise, acc_enabled,
+                                    enable_buttons=(ButtonType.accelCruise, ButtonType.decelCruise),
+                                    resume_button=(ButtonType.accelCruise, ButtonType.resumeCruise)):
+
+    if cs_out.cruiseState.available:
+      for b in self.CS.button_events:
+        if not self.CP.pcmCruise or not self.CP.pcmCruiseSpeed:
+          if b.type in enable_buttons and not b.pressed:
+            acc_enabled = True
+        if not self.CP.pcmCruise:
+          if b.type in resume_button and not self.cp_v_cruise_initialized(vCruise):
+            acc_enabled = False
+        if not self.CP.pcmCruiseSpeed:
+          if b.type == ButtonType.accelCruise and not cs_out.cruiseState.enabled:
+            acc_enabled = False
+    else:
+      acc_enabled = False
+
+    return acc_enabled
+
+  def get_cp_common_state(self, cs_out):
+    cs_out.cruiseState.enabled = self.CS.accEnabled if not self.CP.pcmCruise or not self.CP.pcmCruiseSpeed else cs_out.cruiseState.enabled
+    return cs_out
 
   def frogpilot_distance_functions(self, frogpilot_toggles):
     distance_button = self.CS.distance_button or params_memory.get_bool("OnroadDistanceButtonPressed")

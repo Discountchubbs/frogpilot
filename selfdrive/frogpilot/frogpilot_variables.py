@@ -114,6 +114,7 @@ frogpilot_default_params: list[tuple[str, str | bytes, int]] = [
   ("CustomCruiseLong", "5", 2),
   ("CustomDistanceIcons", "stock", 0),
   ("CustomIcons", "frog-animated", 0),
+  ("CustomStockLong", "0", 2),
   ("CustomPersonalities", "0", 2),
   ("CustomSignals", "frog", 0),
   ("CustomSounds", "frog", 0),
@@ -356,7 +357,7 @@ class FrogPilotVariables:
 
   def update(self, holiday_theme, started):
     openpilot_installed = params.get_bool("HasAcceptedTerms")
-
+    toggle = self.frogpilot_toggles
     key = "CarParams" if started else "CarParamsPersistent"
     msg_bytes = params.get(key, block=openpilot_installed and started)
 
@@ -372,7 +373,7 @@ class FrogPilotVariables:
         is_pid_car = CP.lateralTuning.which == "pid"
         max_acceleration_enabled = CP.alternativeExperience & ALTERNATIVE_EXPERIENCE.RAISE_LONGITUDINAL_LIMITS_TO_ISO_MAX
         openpilot_longitudinal = CP.openpilotLongitudinalControl
-        pcm_cruise = CP.pcmCruise
+        pcm_cruise = CP.pcmCruise and not toggle.customstocklong
         stoppingDecelRate = CP.stoppingDecelRate
         vEgoStopping = CP.vEgoStopping
         vEgoStarting = CP.vEgoStarting
@@ -380,6 +381,7 @@ class FrogPilotVariables:
       always_on_lateral_set = False
       car_make = "mock"
       car_model = "mock"
+      toggle.customstocklong = False
       has_auto_tune = False
       has_bsm = False
       has_pedal = False
@@ -400,6 +402,7 @@ class FrogPilotVariables:
     level = self.tuning_levels
     toggle = self.frogpilot_toggles
 
+    toggle.customstocklong = params.get_bool("CustomStockLong")
     toggle.is_metric = params.get_bool("IsMetric")
     distance_conversion = 1 if toggle.is_metric else CV.FOOT_TO_METER
     small_distance_conversion = 1 if toggle.is_metric else CV.INCH_TO_CM

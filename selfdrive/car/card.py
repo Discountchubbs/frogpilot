@@ -32,7 +32,7 @@ class Car:
 
   def __init__(self, CI=None):
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'frogpilotPlan'])
+    self.sm = messaging.SubMaster(['pandaStates', 'controlsState', 'carControl', 'onroadEvents', 'frogpilotPlan'])
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'frogpilotCarState'])
 
     self.can_rcv_cum_timeout_counter = 0
@@ -64,7 +64,7 @@ class Car:
     if not self.disengage_on_accelerator:
       self.CP.alternativeExperience |= ALTERNATIVE_EXPERIENCE.DISABLE_DISENGAGE_ON_GAS
 
-    if self.CP.customStockLongAvailable and self.params.get_bool("CustomStockLong"):
+    if self.CP.customStockLongAvailable and self.CP.pcmCruise and self.params.get_bool("CustomStockLong"):
         self.CP.pcmCruiseSpeed = False
 
     openpilot_enabled_toggle = self.params.get_bool("OpenpilotEnabledToggle")
@@ -201,7 +201,7 @@ class Car:
     if self.sm.all_alive(['carControl']):
       # send car controls over can
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
-      self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos, self.frogpilot_toggles)
+      self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos, self.sm['controlsState'].experimentalMode, self.sm['frogpilotPlan'].vCruise, self.frogpilot_toggles)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
