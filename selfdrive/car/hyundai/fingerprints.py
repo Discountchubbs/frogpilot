@@ -1042,6 +1042,15 @@ FW_VERSIONS = {
       b'\xf1\x00CE  MFC  AT USA LHD 1.00 1.04 99211-KL000 221213',
     ],
   },
+  CAR.HYUNDAI_IONIQ_6_2025: {
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00CE__ RDR -----      1.00 1.02 99110-KL000         ',
+      b'\xf1\x8b $\x06\x12',
+    ],
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00CE  MFC  AT USA LHD 1.00 1.06 99211-KL000 230915',
+    ],
+  },
   CAR.HYUNDAI_TUCSON_4TH_GEN: {
     (Ecu.fwdCamera, 0x7c4, None): [
       b'\xf1\x00NX4 FR_CMR AT CAN LHD 1.00 1.00 99211-N9260 14Y',
