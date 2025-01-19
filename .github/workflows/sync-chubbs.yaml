@@ -1,0 +1,39 @@
+name: Sync Chubbs Branch
+on:
+  push:
+    branches:
+      - Chubbs
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Sync Device
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: Chubbs
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nmap openssh-client
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "Host *" > ~/.ssh/config
+          echo "  StrictHostKeyChecking no" >> ~/.ssh/config
+          echo "  UserKnownHostsFile /dev/null" >> ~/.ssh/config
+          chmod 600 ~/.ssh/config
+
+      - name: Run sync script
+        run: |
+          chmod +x build_chubbspilot.sh
+          ./build_chubbspilot.sh
+
+      - name: Clean up
+        if: always()
+        run: |
+          rm -f ~/.ssh/config
