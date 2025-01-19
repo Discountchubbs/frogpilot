@@ -55,40 +55,22 @@ void FrogPilotSettingsWindow::createPanelButtons(FrogPilotListWidget *list) {
   QObject::connect(frogpilotVisualsPanel, &FrogPilotVisualsPanel::openParentToggle, this, &FrogPilotSettingsWindow::openParentToggle);
   QObject::connect(frogpilotVisualsPanel, &FrogPilotVisualsPanel::openSubParentToggle, this, &FrogPilotSettingsWindow::openSubParentToggle);
 
-  std::vector<std::vector<std::tuple<QString, QWidget*>>> panelButtons;
-
-  panelButtons = {
-    {std::make_tuple(tr("MANAGE"), frogpilotSoundsPanel)},
-    {
-      std::make_tuple(tr("DRIVING MODEL"), frogpilotModelPanel),
-      std::make_tuple(tr("GAS / BRAKE"), frogpilotLongitudinalPanel),
-      std::make_tuple(tr("STEERING"), frogpilotLateralPanel)
-    },
-    {
-      std::make_tuple(tr("MAP DATA"), frogpilotMapsPanel),
-      std::make_tuple(tr("PRIMELESS NAVIGATION"), frogpilotPrimelessPanel)
-    },
-    {
-      std::make_tuple(tr("DATA"), new FrogPilotDataPanel(this)),
-      std::make_tuple(tr("DEVICE CONTROLS"), frogpilotDevicePanel),
-      std::make_tuple(tr("UTILITIES"), new FrogPilotUtilitiesPanel(this))
-    },
-    {
-      std::make_tuple(tr("APPEARANCE"), frogpilotVisualsPanel),
-      std::make_tuple(tr("THEME"), frogpilotThemesPanel)
-    },
-    {
-      std::make_tuple(tr("MANAGE"), new FrogPilotVehiclesPanel(this))
-    }
+  std::vector<std::vector<std::tuple<QString, QWidget*>>> panelButtons = {
+    {{tr("MANAGE"), frogpilotSoundsPanel}},
+    {{tr("DRIVING MODEL"), frogpilotModelPanel}, {tr("GAS / BRAKE"), frogpilotLongitudinalPanel}, {tr("STEERING"), frogpilotLateralPanel}},
+    {{tr("MAP DATA"), frogpilotMapsPanel}, {tr("PRIMELESS NAVIGATION"), frogpilotPrimelessPanel}},
+    {{tr("DATA"), new FrogPilotDataPanel(this)}, {tr("DEVICE CONTROLS"), frogpilotDevicePanel}, {tr("UTILITIES"), new FrogPilotUtilitiesPanel(this)}},
+    {{tr("APPEARANCE"), frogpilotVisualsPanel}, {tr("THEME"), frogpilotThemesPanel}},
+    {{tr("MANAGE"), new FrogPilotVehiclesPanel(this)}}
   };
 
   std::vector<std::tuple<QString, QString, QString>> panelInfo = {
-    {tr("Alerts and Sounds"), tr("Manage FrogPilot's alerts and notifications."), "../frogpilot/assets/toggle_icons/icon_sound.png"},
-    {tr("Driving Controls"), tr("Adjust features that affect acceleration, braking, and steering."), "../frogpilot/assets/toggle_icons/icon_steering.png"},
-    {tr("Navigation"), tr("Download map data and configure 'Navigate On openpilot (NOO)'."), "../frogpilot/assets/toggle_icons/icon_map.png"},
-    {tr("System Management"), tr("Access tools, utilities, and device controls to maintain and troubleshoot FrogPilot."), "../frogpilot/assets/toggle_icons/icon_system.png"},
-    {tr("Theme and Appearance"), tr("Customize the openpilot theme, UI appearance, and on-road widgets."), "../frogpilot/assets/toggle_icons/icon_display.png"},
-    {tr("Vehicle Controls"), tr("Configure vehicle-specific settings for supported makes and models."), "../frogpilot/assets/toggle_icons/icon_vehicle.png"}
+    {tr("Alerts and Sounds"), tr("Manage FrogPilot's alerts and sounds."), "../frogpilot/assets/toggle_icons/icon_sound.png"},
+    {tr("Driving Controls"), tr("Manage FrogPilot's features that affect acceleration, braking, and steering."), "../frogpilot/assets/toggle_icons/icon_steering.png"},
+    {tr("Navigation"), tr("Manage map data to be used with 'Curve Speed Control' and 'Speed Limit Controller' and setup 'Navigate On openpilot (NOO)' without a comma prime subscription."), "../frogpilot/assets/toggle_icons/icon_map.png"},
+    {tr("System Management"), tr("Manage the device's internal settings along with other tools and utilities to maintain and troubleshoot FrogPilot."), "../frogpilot/assets/toggle_icons/icon_system.png"},
+    {tr("Theme and Appearance"), tr("Manage openpilot's theme and onroad widgets."), "../frogpilot/assets/toggle_icons/icon_display.png"},
+    {tr("Vehicle Controls"), tr("Manage vehicle-specific settings."), "../frogpilot/assets/toggle_icons/icon_vehicle.png"}
   };
 
   for (size_t i = 0; i < panelInfo.size(); ++i) {

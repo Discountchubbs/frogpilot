@@ -25,8 +25,8 @@ def check_github_rate_limit():
     print("GitHub rate limit reached")
     print(f"GitHub Rate Limit Resets At (UTC): {reset_time}")
     return False
-  except requests.exceptions.RequestException as e:
-    print(f"Error checking GitHub rate limit: {e}")
+  except requests.exceptions.RequestException as error:
+    print(f"Error checking GitHub rate limit: {error}")
     return False
 
 def download_file(cancel_param, destination, progress_param, url, download_param, params_memory):

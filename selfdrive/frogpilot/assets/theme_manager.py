@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from dateutil import easter
 from pathlib import Path
 
-from openpilot.selfdrive.frogpilot.assets.download_functions import GITLAB_URL, download_file, get_repository_url, handle_error, verify_download
+from openpilot.selfdrive.frogpilot.assets.download_functions import GITLAB_URL, download_file, get_repository_url, handle_error, handle_request_error, verify_download
 from openpilot.selfdrive.frogpilot.frogpilot_utilities import delete_file, extract_zip
 from openpilot.selfdrive.frogpilot.frogpilot_variables import ACTIVE_THEME_PATH, RANDOM_EVENTS_PATH, THEME_SAVE_PATH, params, params_memory, update_frogpilot_toggles
 
@@ -271,19 +271,20 @@ class ThemeManager:
       "wheels": []
     }
 
-    for branch in branches:
-      if "github" in repo_url:
-        api_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
-      elif "gitlab" in repo_url:
-        api_url = f"https://gitlab.com/api/v4/projects/{repo.replace('/', '%2F')}/repository/tree?ref={branch}&recursive=true"
-      else:
-        print(f"Unsupported repository URL: {repo_url}")
-        return assets
+    try:
+      for branch in branches:
+        if "github" in repo_url:
+          api_url = f"https://api.github.com/repos/{repo}/git/trees/{branch}?recursive=1"
+        elif "gitlab" in repo_url:
+          api_url = f"https://gitlab.com/api/v4/projects/{repo.replace('/', '%2F')}/repository/tree?ref={branch}&recursive=true"
+        else:
+          print(f"Unsupported repository URL: {repo_url}")
+          return assets
 
-      print(f"Fetching assets from branch '{branch}': {api_url}")
-      response = requests.get(api_url, timeout=10)
-      response.raise_for_status()
-      content = response.json()
+        print(f"Fetching assets from branch '{branch}': {api_url}")
+        response = requests.get(api_url, timeout=10)
+        response.raise_for_status()
+        content = response.json()
 
       if "github" in repo_url:
         content = content.get('tree', [])
@@ -310,7 +311,10 @@ class ThemeManager:
           elif "sounds" in item_path:
             assets["themes"][theme_name].add("sounds")
 
-    return {**assets, "themes": {k: list(v) for k, v in assets["themes"].items()}}
+      return {**assets, "themes": {k: list(v) for k, v in assets["themes"].items()}}
+    except requests.exceptions.RequestException as error:
+      handle_request_error(f"Failed to fetch theme sizes from {'GitHub' if 'github' in repo_url else 'GitLab'}: {error}", None, None, None, None)
+      return {}
 
   def update_theme_params(self, downloadable_colors, downloadable_distance_icons, downloadable_icons, downloadable_signals, downloadable_sounds, downloadable_wheels):
     def update_param(key, assets, subfolder):
@@ -391,7 +395,7 @@ class ThemeManager:
       return
 
     assets = self.fetch_assets(repo_url)
-    if not assets["themes"] and not assets["wheels"]:
+    if not assets:
       return
 
     downloadable_colors = []

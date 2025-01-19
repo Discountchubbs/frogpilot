@@ -78,7 +78,9 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
     speedLimit = nav_alive ? nav_instruction.getSpeedLimit() : 0.0;
   }
   speedLimit *= (s.scene.is_metric ? MS_TO_KPH : MS_TO_MPH);
-  speedLimit += (showSLCOffset || slcOverridden ? 0 : slcSpeedLimitOffset);
+  if (s.scene.speed_limit_controller && !showSLCOffset && !slcOverridden && speedLimit != 0) {
+    speedLimit += slcSpeedLimitOffset;
+  }
 
   has_us_speed_limit = (nav_alive && speed_limit_sign == cereal::NavInstruction::SpeedLimitSign::MUTCD) || !useViennaSLCSign && !hideSpeedLimit;
   has_eu_speed_limit = (nav_alive && speed_limit_sign == cereal::NavInstruction::SpeedLimitSign::VIENNA) || useViennaSLCSign && !hideSpeedLimit;
@@ -768,7 +770,7 @@ void AnnotatedCameraWidget::drawLead(QPainter &painter, const cereal::RadarState
               .arg(qRound(lead_speed * speedConversionMetrics))
               .arg(leadSpeedUnit);
     } else {
-      text = QString("%1 %2 (%3) | %4 %5 | %6 %7")
+      text = QString("%1 %2 (%3) | %4 %5 | %6%7")
               .arg(qRound(d_rel * distanceConversion))
               .arg(leadDistanceUnit)
               .arg(QString("Desired: %1").arg(desiredFollow * distanceConversion))
@@ -1217,10 +1219,6 @@ void PedalIcons::updateState(const UIScene &scene) {
 
   accelerating = acceleration > 0.25f;
   decelerating = acceleration < -0.25f;
-
-  if (accelerating || decelerating) {
-    update();
-  }
 }
 
 void PedalIcons::paintEvent(QPaintEvent *event) {

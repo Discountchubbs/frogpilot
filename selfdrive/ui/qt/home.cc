@@ -259,6 +259,8 @@ void OffroadHome::refresh() {
   date->setText(QLocale(uiState()->language.mid(5)).toString(QDateTime::currentDateTime(), "dddd, MMMM d"));
   version->setText(getBrand() + " v" + getVersion().left(14).trimmed() + " - " + model);
 
+  date->setVisible(util::system_time_valid());
+
   bool updateAvailable = update_widget->refresh();
   int alerts = alerts_widget->refresh();
 

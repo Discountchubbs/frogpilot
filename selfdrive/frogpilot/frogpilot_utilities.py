@@ -50,6 +50,8 @@ def run_thread_with_lock(name, target, args=()):
           target(*t_args)
         except HTTPError as error:
           print(f"HTTP error while accessing {api_url}: {error}")
+        except subprocess.CalledProcessError as error:
+          print(f"CalledProcessError in thread '{name}': {error}")
         except Exception as error:
           print(f"Error in thread '{name}': {error}")
           sentry.capture_exception(error)

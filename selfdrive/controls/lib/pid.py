@@ -5,7 +5,7 @@ from openpilot.common.numpy_fast import clip, interp
 
 
 class PIDController:
-  def __init__(self, k_p, k_i, k_f=0., k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100, lateral_pid=False):
+  def __init__(self, k_p, k_i, k_f=0., k_d=0., pos_limit=1e308, neg_limit=-1e308, rate=100, lateral_pid=False, longitudinal_pid=False):
     self._k_p = k_p
     self._k_i = k_i
     self._k_d = k_d
@@ -28,6 +28,7 @@ class PIDController:
 
     # FrogPilot variables
     self.lateral_pid = lateral_pid
+    self.longitudinal_pid = longitudinal_pid
 
   @property
   def k_p(self):
@@ -66,7 +67,7 @@ class PIDController:
       self.i -= self.i_unwind_rate * float(np.sign(self.i))
     else:
       if not freeze_integrator:
-        if frogpilot_toggles is not None and frogpilot_toggles.frogsgomoo_tweak and feedforward > 0:
+        if self.longitudinal_pid and frogpilot_toggles.frogsgomoo_tweak:
           self.i = self.i + error * interp(self.speed, frogpilot_toggles.kiBP, frogpilot_toggles.kiV) * self.i_rate
         else:
           self.i = self.i + error * self.k_i * self.i_rate

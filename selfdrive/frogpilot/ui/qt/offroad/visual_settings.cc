@@ -175,7 +175,7 @@ FrogPilotVisualsPanel::FrogPilotVisualsPanel(FrogPilotSettingsWindow *parent) : 
           modifiedDeveloperWidgetKeys.erase("ShowStoppingPoint");
         }
 
-        if (!params.getBool("ConditionalExperimentalMode")) {
+        if (!params.getBool("ConditionalExperimental")) {
           modifiedDeveloperWidgetKeys.erase("ShowCEMStatus");
         }
 

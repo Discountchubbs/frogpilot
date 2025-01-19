@@ -296,7 +296,7 @@ void FrogPilotVehiclesPanel::updateToggles() {
         setVisible &= !hasSNG;
       }
       if (key == "LockDoorsTimer") {
-        setVisible = allowAutoLockingDoors;
+        setVisible &= allowAutoLockingDoors;
       }
     }
 
