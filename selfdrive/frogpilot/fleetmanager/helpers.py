@@ -227,19 +227,24 @@ def get_nav_active():
     return False
 
 def get_amap_key():
-  return (
-    token.strip() if (token := params.get("AMapKey1", encoding='utf8')) != "0" else None,
-    token2.strip() if (token2 := params.get("AMapKey2", encoding='utf8')) != "0" else None
-  )
+    token1 = params.get("AMapKey1", encoding='utf8')
+    token2 = params.get("AMapKey2", encoding='utf8')
+    return (
+        token1.strip() if token1 and token1 != "0" else None,
+        token2.strip() if token2 and token2 != "0" else None
+    )
 
 def get_gmap_key():
-  return token.strip() if (token := params.get("GMapKey", encoding='utf8')) != "0" else None
+    token = params.get("GMapKey", encoding='utf8')
+    return token.strip() if token and token != "0" else None
 
 def get_public_token():
-  return token.strip() if (token := params.get("MapboxPublicKey", encoding='utf8')).startswith("pk") else None
+    token = params.get("MapboxPublicKey", encoding='utf8')
+    return token.strip() if token and token.startswith("pk") else None
 
 def get_app_token():
-  return token.strip() if (token := params.get("MapboxSecretKey", encoding='utf8')).startswith("sk") else None
+    token = params.get("MapboxSecretKey", encoding='utf8')
+    return token.strip() if token and token.startswith("sk") else None
 
 def get_SearchInput():
   SearchInput = params.get_int("SearchInput")
@@ -316,6 +321,8 @@ def set_destination(postvars, valid_addr):
   else:
     addr = postvars.get("place_name")
     token = get_public_token()
+    lat = float(postvars.get("lat"))
+    lon = float(postvars.get("lon"))
     data, lon, lat, valid_addr, token = search_addr(addr, lon, lat, valid_addr, token)
     postvars["lat"] = lat
     postvars["lon"] = lon
