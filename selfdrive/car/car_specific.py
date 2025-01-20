@@ -7,7 +7,9 @@ from opendbc.car.volkswagen.values import CarControllerParams as VWCarController
 from opendbc.car.hyundai.interface import ENABLE_BUTTONS as HYUNDAI_ENABLE_BUTTONS
 from opendbc.car.hyundai.carstate import PREV_BUTTON_SAMPLES as HYUNDAI_PREV_BUTTON_SAMPLES
 
-from openpilot.selfdrive.selfdrived.events import Events
+from openpilot.selfdrive.selfdrived.events import Events, ET
+
+from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
@@ -40,6 +42,8 @@ class CarSpecificEvents:
     self.silent_steer_warning = True
 
     self.cruise_buttons: deque = deque([], maxlen=HYUNDAI_PREV_BUTTON_SAMPLES)
+
+    self.do_shutdown = False
 
   def update(self, CS: car.CarState, CS_prev: car.CarState, CC: car.CarControl):
     if self.CP.carName in ('body', 'mock'):
@@ -149,7 +153,8 @@ class CarSpecificEvents:
       # Main button also can trigger an engagement on these cars
       self.cruise_buttons.append(any(ev.type in HYUNDAI_ENABLE_BUTTONS for ev in CS.buttonEvents))
       events = self.create_common_events(CS, CS_prev, extra_gears=(GearShifter.sport, GearShifter.manumatic),
-                                         pcm_enable=self.CP.pcmCruise, allow_enable=any(self.cruise_buttons))
+                                         pcm_enable=self.CP.pcmCruise, allow_enable=True)
+                                         #pcm_enable=self.CP.pcmCruise, allow_enable=any(self.cruise_buttons))
 
       # low speed steer alert hysteresis logic (only for cars with steer cut off above 10 m/s)
       if CS.vEgo < (self.CP.minSteerSpeed + 2.) and self.CP.minSteerSpeed > 10.:
@@ -218,6 +223,9 @@ class CarSpecificEvents:
       # Disable on rising and falling edge of cancel for both stock and OP long
       if b.type == ButtonType.cancel:
         events.add(EventName.buttonCancel)
+        if CS.gearShifter == GearShifter.park and not self.do_shutdown:
+          self.do_shutdown = True
+          Params().put_bool("DoShutdown", True)
 
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if CS.steeringPressed else self.steering_unpressed + 1
@@ -247,4 +255,13 @@ class CarSpecificEvents:
       elif not CS.cruiseState.enabled:
         events.add(EventName.pcmDisable)
 
+
+    if not self.CP.pcmCruise:
+      if CS.activateCruise > 0 and CS_prev.activateCruise <= 0:
+        if not events.contains(ET.NO_ENTRY):
+          events.add(EventName.buttonEnable)
+      elif CS.activateCruise < 0 and CS_prev.activateCruise >= 0:
+        events.add(EventName.buttonCancel)
+      if CS.softHoldActive > 0:
+        events.add(EventName.softHold)
     return events

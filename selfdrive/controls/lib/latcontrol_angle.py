@@ -11,7 +11,7 @@ class LatControlAngle(LatControl):
     super().__init__(CP, CI)
     self.sat_check_min_speed = 5.
 
-  def update(self, active, CS, VM, params, steer_limited, desired_curvature, calibrated_pose):
+  def update(self, active, CS, VM, params, steer_limited, desired_curvature, desired_curvature_now, calibrated_pose, model_data=None):
     angle_log = log.ControlsState.LateralAngleState.new_message()
 
     if not active:
@@ -25,5 +25,5 @@ class LatControlAngle(LatControl):
     angle_control_saturated = abs(angle_steers_des - CS.steeringAngleDeg) > STEER_ANGLE_SATURATION_THRESHOLD
     angle_log.saturated = self._check_saturation(angle_control_saturated, CS, False)
     angle_log.steeringAngleDeg = float(CS.steeringAngleDeg)
-    angle_log.steeringAngleDesiredDeg = angle_steers_des
+    angle_log.steeringAngleDesiredDeg = angle_steers_des if not CS.steeringPressed else float(CS.steeringAngleDeg)
     return 0, float(angle_steers_des), angle_log

@@ -17,7 +17,7 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 
 LON_MPC_STEP = 0.2  # first step is 0.2s
-A_CRUISE_MIN = -1.2
+A_CRUISE_MIN = -2.0 #-1.2
 A_CRUISE_MAX_VALS = [1.6, 1.2, 0.8, 0.6]
 A_CRUISE_MAX_BP = [0., 10.0, 25., 40.]
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
@@ -49,22 +49,24 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
 
   return [a_target[0], min(a_target[1], a_x_allowed)]
 
-
-def get_accel_from_plan(speeds, accels, action_t=DT_MDL, vEgoStopping=0.05):
+from openpilot.common.params import Params
+def get_accel_from_plan(speeds, accels, jerks, action_t=DT_MDL, vEgoStopping=0.05):
   if len(speeds) == CONTROL_N:
     v_now = speeds[0]
     a_now = accels[0]
 
     v_target = interp(action_t, CONTROL_N_T_IDX, speeds)
+    j_target = interp(action_t, CONTROL_N_T_IDX, jerks)
     a_target = 2 * (v_target - v_now) / (action_t) - a_now
     v_target_1sec = interp(action_t + 1.0, CONTROL_N_T_IDX, speeds)
   else:
     v_target = 0.0
+    j_target = 0.0
     v_target_1sec = 0.0
     a_target = 0.0
   should_stop = (v_target < vEgoStopping and
                  v_target_1sec < vEgoStopping)
-  return a_target, should_stop
+  return a_target, should_stop, v_target, j_target
 
 
 class LongitudinalPlanner:
@@ -141,6 +143,9 @@ class LongitudinalPlanner:
       # Clip aEgo to cruise limits to prevent large accelerations when becoming active
       self.a_desired = clip(sm['carState'].aEgo, accel_limits[0], accel_limits[1])
 
+      self.mpc.prev_a = np.full(N+1, self.a_desired) ## carrot
+      accel_limits_turns[0] = accel_limits_turns[0] = 0.0 ## carrot
+
     # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
     # Compute model v_ego error
@@ -170,7 +175,7 @@ class LongitudinalPlanner:
     self.j_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC[:-1], self.mpc.j_solution)
 
     # TODO counter is only needed because radar is glitchy, remove once radar is gone
-    self.fcw = self.mpc.crash_cnt > 2 and not sm['carState'].standstill
+    self.fcw = self.mpc.crash_cnt > 2 and not sm['carState'].standstill and not reset_state
     if self.fcw:
       cloudlog.info("FCW triggered")
 
@@ -196,13 +201,20 @@ class LongitudinalPlanner:
     longitudinalPlan.hasLead = sm['radarState'].leadOne.status
     longitudinalPlan.longitudinalPlanSource = self.mpc.source
     longitudinalPlan.fcw = self.fcw
+        
+    longitudinalActuatorDelay = Params().get_float("LongActuatorDelay")*0.01
+    action_t =  longitudinalActuatorDelay + DT_MDL
 
-    action_t =  self.CP.longitudinalActuatorDelay + DT_MDL
-    a_target, should_stop = get_accel_from_plan(longitudinalPlan.speeds, longitudinalPlan.accels,
+    a_target, should_stop, v_target, j_target = get_accel_from_plan(longitudinalPlan.speeds, longitudinalPlan.accels, longitudinalPlan.jerks,
                                                 action_t=action_t, vEgoStopping=self.CP.vEgoStopping)
     longitudinalPlan.aTarget = a_target
     longitudinalPlan.shouldStop = should_stop
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = self.allow_throttle
 
+    longitudinalPlan.vTarget = v_target
+    longitudinalPlan.jTarget = j_target
+    longitudinalPlan.xTarget = self.v_cruise_kph
+    longitudinalPlan.tFollow = float(self.mpc.t_follow)
+    longitudinalPlan.desiredDistance = float(self.mpc.desired_distance)
     pm.send('longitudinalPlan', plan_send)

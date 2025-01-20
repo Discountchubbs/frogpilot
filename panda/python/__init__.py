@@ -221,6 +221,13 @@ class Panda:
 
   FLAG_GM_HW_CAM = 1
   FLAG_GM_HW_CAM_LONG = 2
+  FLAG_GM_HW_SDGM = 4
+  FLAG_GM_CC_LONG = 8
+  FLAG_GM_NO_CAMERA = 16
+  FLAG_GM_HW_ASCM_LONG = 32
+  FLAG_GM_NO_ACC = 64
+  FLAG_GM_PEDAL_LONG = 128  # TODO: This can be inferred
+  FLAG_GM_GAS_INTERCEPTOR = 256
 
   FLAG_FORD_LONG_CONTROL = 1
   FLAG_FORD_CANFD = 2
@@ -325,8 +332,8 @@ class Panda:
     self.can_reset_communications()
 
     # disable automatic CAN-FD switching
-    for bus in range(PANDA_BUS_CNT):
-      self.set_canfd_auto(bus, False)
+    #for bus in range(PANDA_BUS_CNT):
+    #  self.set_canfd_auto(bus, False)
 
     # set CAN speed
     for bus in range(PANDA_BUS_CNT):
