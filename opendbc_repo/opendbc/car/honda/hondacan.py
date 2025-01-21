@@ -56,8 +56,6 @@ def create_brake_command(packer, CAN, apply_brake, pump_on, pcm_override, pcm_ca
   pcm_fault_cmd = False
 
   values = {
-    "COMPUTER_BRAKE": apply_brake,
-    "BRAKE_PUMP_REQUEST": pump_on,
     "CRUISE_OVERRIDE": pcm_override,
     "CRUISE_FAULT_CMD": pcm_fault_cmd,
     "CRUISE_CANCEL_CMD": pcm_cancel_cmd,
@@ -70,6 +68,14 @@ def create_brake_command(packer, CAN, apply_brake, pump_on, pcm_override, pcm_ca
     "AEB_REQ_2": 0,
     "AEB_STATUS": 0,
   }
+
+  if car_fingerprint == CAR.HONDA_CLARITY:
+    values["COMPUTER_BRAKE_ALT"] = apply_brake
+    values["BRAKE_PUMP_REQUEST_ALT"] = apply_brake > 0
+  else:
+    values["COMPUTER_BRAKE"] = apply_brake
+    values["BRAKE_PUMP_REQUEST"] = pump_on
+
   return packer.make_can_msg("BRAKE_COMMAND", CAN.pt, values)
 
 
@@ -135,7 +141,7 @@ def create_bosch_supplemental_1(packer, CAN):
   return packer.make_can_msg("BOSCH_SUPPLEMENTAL_1", CAN.lkas, values)
 
 
-def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_hud, lkas_hud):
+def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_hud, lkas_hud, lat_active):
   commands = []
   radar_disabled = CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS) and CP.openpilotLongitudinalControl
 
@@ -169,7 +175,7 @@ def create_ui_commands(packer, CAN, CP, enabled, pcm_speed, hud, is_metric, acc_
   lkas_hud_values = {
     'SET_ME_X41': 0x41,
     'STEERING_REQUIRED': hud.steer_required,
-    'SOLID_LANES': hud.lanes_visible,
+    'SOLID_LANES': lat_active,
     'BEEP': 0,
   }
 

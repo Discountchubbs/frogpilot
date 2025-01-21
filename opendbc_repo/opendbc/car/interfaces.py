@@ -10,6 +10,7 @@ from typing import Any, NamedTuple
 from collections.abc import Callable
 from functools import cache
 
+from cereal import car, custom
 from opendbc.car import DT_CTRL, apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, get_friction, STD_CARGO_KG
 from opendbc.car import structs
 from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallable
@@ -21,7 +22,11 @@ from opendbc.car.values import PLATFORMS
 from opendbc.can.parser import CANParser
 
 from openpilot.common.params import Params
+from openpilot.selfdrive.controls.lib.drive_helpers import CRUISE_LONG_PRESS, V_CRUISE_MAX, get_friction
+from openpilot.selfdrive.frogpilot.frogpilot_variables import get_frogpilot_toggles, params, params_memory
 
+ButtonType = structs.CarState.ButtonEvent.Type
+FrogPilotButtonType = custom.FrogPilotCarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
 
 V_CRUISE_MAX = 145
@@ -30,12 +35,14 @@ ACCEL_MAX = 2.5
 ACCEL_MIN = -4.0 #3.5
 FRICTION_THRESHOLD = 0.3
 
-NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/neural_ff_weights.json')
-TORQUE_NN_MODEL_PATH = os.path.join(BASEDIR, 'torque_data/lat_models')
+NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/neural_ff_weights.json')
+TORQUE_NN_MODEL_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/lat_models')
+TORQUE_PARAMS_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/params.toml')
+TORQUE_OVERRIDE_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/override.toml')
+TORQUE_SUBSTITUTE_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/substitute.toml')
 
-TORQUE_PARAMS_PATH = os.path.join(BASEDIR, 'torque_data/params.toml')
-TORQUE_OVERRIDE_PATH = os.path.join(BASEDIR, 'torque_data/override.toml')
-TORQUE_SUBSTITUTE_PATH = os.path.join(BASEDIR, 'torque_data/substitute.toml')
+# dict used to rename activation functions whose names aren't valid python identifiers
+ACTIVATION_FUNCTION_NAMES = {'σ': 'sigmoid'}
 
 GEAR_SHIFTER_MAP: dict[str, structs.CarState.GearShifter] = {
   'P': GearShifter.park, 'PARK': GearShifter.park,
@@ -93,8 +100,6 @@ def get_torque_params():
 
 # Twilsonco's Lateral Neural Network Feedforward
 class FluxModel:
-  # dict used to rename activation functions whose names aren't valid python identifiers
-  activation_function_names = {'σ': 'sigmoid'}
   def __init__(self, params_file, zero_bias=False):
     with open(params_file, "r") as f:
       params = json.load(f)
@@ -112,7 +117,7 @@ class FluxModel:
       if zero_bias:
         b = np.zeros_like(b)
       activation = layer_params["activation"]
-      for k, v in self.activation_function_names.items():
+      for k, v in ACTIVATION_FUNCTION_NAMES.items():
         activation = activation.replace(k, v)
       self.layers.append((W, b, activation))
 
@@ -176,10 +181,6 @@ def get_nn_model_path(car, eps_firmware) -> tuple[str | None, float]:
           model_path = os.path.join(TORQUE_NN_MODEL_PATH, f)
     return model_path, max_similarity
 
-  #car1 = car.replace('_', ' ')
-  #car1 = car1.replace(' HEV', ' HYBRID')
-  #car = car1.replace('EV ', 'ELECTRIC ')
-  print("########get_nn_model_path :", car, eps_firmware)
   if len(eps_firmware) > 3:
     eps_firmware = eps_firmware.replace("\\", "")
     check_model = f"{car} {eps_firmware}"
@@ -208,21 +209,41 @@ class CarInterfaceBase(ABC):
     self.frame = 0
     self.v_ego_cluster_seen = False
 
-    self.CS: CarStateBase = CarState(CP)
-    self.can_parsers: dict[StrEnum, CANParser] = self.CS.get_can_parsers(CP)
+    self.CS = CarState(CP)
+    self.cp = self.CS.get_can_parser(CP)
+    self.cp_cam = self.CS.get_cam_can_parser(CP)
+    self.cp_adas = self.CS.get_adas_can_parser(CP)
+    self.cp_body = self.CS.get_body_can_parser(CP)
+    self.cp_loopback = self.CS.get_loopback_can_parser(CP)
+    self.can_parsers = [self.cp, self.cp_cam, self.cp_adas, self.cp_body, self.cp_loopback]
 
-    dbc_names = {bus: cp.dbc_name for bus, cp in self.can_parsers.items()}
-    self.CC: CarControllerBase = CarController(dbc_names, CP)
+    dbc_name = "" if self.cp is None else self.cp.dbc_name
+    self.CC: CarControllerBase = CarController(dbc_name, CP, self.VM)
 
-    Params().put('LongitudinalPersonalityMax', "3")
+    # FrogPilot variables
+    self.frogpilot_toggles = get_frogpilot_toggles()
+
     eps_firmware = str(next((fw.fwVersion for fw in CP.carFw if fw.ecu == "eps"), ""))
 
     comma_nnff_supported = self.check_comma_nn_ff_support(CP.carFingerprint)
     nnff_supported = self.initialize_lat_torque_nn(CP.carFingerprint, eps_firmware)
 
-    self.use_nnff = not comma_nnff_supported and nnff_supported and Params().get_bool("NNFF")
-    self.use_nnff_lite = not self.use_nnff and Params().get_bool("NNFFLite")
-    
+    self.use_nnff = not comma_nnff_supported and nnff_supported and self.frogpilot_toggles.nnff
+    self.use_nnff_lite = not self.use_nnff and self.frogpilot_toggles.nnff_lite
+
+    self.always_on_lateral_disabled = False
+    self.belowSteerSpeed_shown = False
+    self.disable_belowSteerSpeed = False
+    self.disable_resumeRequired = False
+    self.prev_distance_button = False
+    self.resumeRequired_shown = False
+    self.traffic_mode_active = False
+    self.traffic_mode_changed = False
+
+    self.gap_counter = 0
+
+    self.is_gm = self.CP.carName == "gm"
+
   def get_ff_nn(self, x):
     return self.lat_torque_nn_model.evaluate(x)
 
@@ -234,12 +255,9 @@ class CarInterfaceBase(ABC):
   def initialize_lat_torque_nn(self, car, eps_firmware) -> bool:
     self.lat_torque_nn_model = get_nn_model(car, eps_firmware)
     return self.lat_torque_nn_model is not None
-    
 
-  def apply(self, c: structs.CarControl, now_nanos: int | None = None) -> tuple[structs.CarControl.Actuators, list[CanData]]:
-    if now_nanos is None:
-      now_nanos = int(time.monotonic() * 1e9)
-    return self.CC.update(c, self.CS, now_nanos)
+  def apply(self, c: structs.CarControl, now_nanos: int, frogpilot_toggles) -> tuple[structs.CarControl.Actuators, list[tuple[int, int, bytes, int]]]:
+    return self.CC.update(c, self.CS, now_nanos, frogpilot_toggles)
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
@@ -250,11 +268,11 @@ class CarInterfaceBase(ABC):
     """
     Parameters essential to controlling the car may be incomplete or wrong without FW versions or fingerprints.
     """
-    return cls.get_params(candidate, gen_empty_fingerprint(), list(), False, False)
+    return cls.get_params(candidate, gen_empty_fingerprint(), list(), False, False, False)
 
   @classmethod
-  def get_params(cls, candidate: str, fingerprint: dict[int, dict[int, int]], car_fw: list[structs.CarParams.CarFw],
-                 experimental_long: bool, docs: bool) -> structs.CarParams:
+  def get_params(cls, candidate: str, fingerprint: dict[int, dict[int, int]], car_fw: list[structs.CarParams.CarFw], disable_openpilot_long: bool,
+                 experimental_long: bool, params: params, docs: bool) -> structs.CarParams:
     ret = CarInterfaceBase.get_std_params(candidate)
 
     platform = PLATFORMS[candidate]
@@ -267,20 +285,15 @@ class CarInterfaceBase(ABC):
     ret.tireStiffnessFactor = platform.config.specs.tireStiffnessFactor
     ret.flags |= int(platform.config.flags)
 
-    ret = cls._get_params(ret, candidate, fingerprint, car_fw, experimental_long, docs)
-    
+    ret = cls._get_params(ret, candidate, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs)
+
     # Enable torque controller for all cars that do not use angle based steering
-    if ret.steerControlType != structs.CarParams.SteerControlType.angle and Params().get_bool("NNFF"):
+    if ret.steerControlType != structs.CarParams.SteerControlType.angle and params.get_bool("LateralTune") and params.get_bool("NNFF"):
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
       eps_firmware = str(next((fw.fwVersion for fw in car_fw if fw.ecu == "eps"), ""))
       model = get_nn_model_path(candidate, eps_firmware)
       if model is not None:
-        Params().put_nonblocking("NNFFModelName", candidate.replace("_", " "))
-        print(f"NNFF loaded... {model}")
-    
-
-    if Params().get_bool("DisableMinSteerSpeed"):
-      ret.minSteerSpeed = 0.
+        params.put("NNFFModelName", candidate.replace("_", " "))
 
     # Vehicle mass is published curb weight plus assumed payload such as a human driver; notCars have no assumed payload
     if not ret.notCar:
@@ -370,14 +383,14 @@ class CarInterfaceBase(ABC):
   def _update(self) -> structs.CarState:
     return self.CS.update(self.can_parsers)
 
-  def update(self, can_packets: list[tuple[int, list[CanData]]]) -> structs.CarState:
+  def update(self, c: structs.CarControl, can_strings: list[bytes], frogpilot_toggles) -> structs.CarState:
     # parse can
     for cp in self.can_parsers.values():
       if cp is not None:
         cp.update_strings(can_packets)
 
     # get CarState
-    ret = self._update()
+    ret, fp_ret = self._update(c, frogpilot_toggles)
 
     ret.canValid = all(cp.can_valid for cp in self.can_parsers.values())
     ret.canTimeout = any(cp.bus_timeout for cp in self.can_parsers.values())
@@ -395,11 +408,125 @@ class CarInterfaceBase(ABC):
     if ret.cruiseState.speedCluster == 0:
       ret.cruiseState.speedCluster = ret.cruiseState.speed
 
-    # save for next iteration
-    self.CS.out = ret
+    # Add any additional frogpilotCarStates
+    fp_ret.alwaysOnLateralDisabled = self.always_on_lateral_disabled
+    fp_ret.distanceLongPressed = self.frogpilot_distance_functions(frogpilot_toggles)
+    fp_ret.ecoGear |= ret.gearShifter == GearShifter.eco
+    fp_ret.sportGear |= ret.gearShifter == GearShifter.sport
+    fp_ret.trafficModeActive = self.traffic_mode_active
 
-    return ret
+    # copy back for next iteration
+    if self.CS is not None:
+      self.CS.out = ret.as_reader()
 
+    return ret, fp_ret
+
+
+  def create_common_events(self, cs_out, extra_gears=None, pcm_enable=True, allow_enable=True,
+                           enable_buttons=(ButtonType.accelCruise, ButtonType.decelCruise)):
+    events = Events()
+
+    if cs_out.doorOpen:
+      events.add(EventName.doorOpen)
+    if cs_out.seatbeltUnlatched:
+      events.add(EventName.seatbeltNotLatched)
+    if cs_out.gearShifter != GearShifter.drive and (extra_gears is None or
+       cs_out.gearShifter not in extra_gears):
+      events.add(EventName.wrongGear)
+    if cs_out.gearShifter == GearShifter.reverse:
+      events.add(EventName.reverseGear)
+    if not cs_out.cruiseState.available:
+      events.add(EventName.wrongCarMode)
+    if cs_out.espDisabled:
+      events.add(EventName.espDisabled)
+    if cs_out.stockFcw:
+      events.add(EventName.stockFcw)
+    if cs_out.stockAeb:
+      events.add(EventName.stockAeb)
+    if cs_out.vEgo > MAX_CTRL_SPEED:
+      events.add(EventName.speedTooHigh)
+    if cs_out.cruiseState.nonAdaptive:
+      events.add(EventName.wrongCruiseMode)
+    if cs_out.brakeHoldActive and self.CP.openpilotLongitudinalControl:
+      events.add(EventName.brakeHold)
+    if cs_out.parkingBrake:
+      events.add(EventName.parkBrake)
+    if cs_out.accFaulted:
+      events.add(EventName.accFaulted)
+    if cs_out.steeringPressed:
+      events.add(EventName.steerOverride)
+    if cs_out.brakePressed and cs_out.standstill:
+      events.add(EventName.preEnableStandstill)
+    if cs_out.gasPressed:
+      events.add(EventName.gasPressedOverride)
+
+    # Handle button presses
+    for b in cs_out.buttonEvents:
+      # Enable OP long on falling edge of enable buttons (defaults to accelCruise and decelCruise, overridable per-port)
+      if not self.CP.pcmCruise and (b.type in enable_buttons and not b.pressed):
+        events.add(EventName.buttonEnable)
+      # Disable on rising and falling edge of cancel for both stock and OP long
+      if b.type == ButtonType.cancel:
+        events.add(EventName.buttonCancel)
+
+      # FrogPilot button presses
+      if b.type == FrogPilotButtonType.lkas and b.pressed:
+        self.always_on_lateral_disabled = not self.always_on_lateral_disabled
+
+    # Handle permanent and temporary steering faults
+    self.steering_unpressed = 0 if cs_out.steeringPressed else self.steering_unpressed + 1
+    if cs_out.steerFaultTemporary:
+      if cs_out.steeringPressed and (not self.CS.out.steerFaultTemporary or self.no_steer_warning):
+        self.no_steer_warning = True
+      else:
+        self.no_steer_warning = False
+
+        # if the user overrode recently, show a less harsh alert
+        if self.silent_steer_warning or cs_out.standstill or self.steering_unpressed < int(1.5 / DT_CTRL):
+          self.silent_steer_warning = True
+          events.add(EventName.steerTempUnavailableSilent)
+        else:
+          events.add(EventName.steerTempUnavailable)
+    else:
+      self.no_steer_warning = False
+      self.silent_steer_warning = False
+    if cs_out.steerFaultPermanent:
+      events.add(EventName.steerUnavailable)
+
+    # we engage when pcm is active (rising edge)
+    # enabling can optionally be blocked by the car interface
+    if pcm_enable:
+      if cs_out.cruiseState.enabled and not self.CS.out.cruiseState.enabled and allow_enable:
+        events.add(EventName.pcmEnable)
+      elif not cs_out.cruiseState.enabled:
+        events.add(EventName.pcmDisable)
+
+    return events
+
+  def frogpilot_distance_functions(self, frogpilot_toggles):
+    distance_button = self.CS.distance_button or params_memory.get_bool("OnroadDistanceButtonPressed")
+
+    if distance_button:
+      self.gap_counter += 1
+    elif not self.prev_distance_button:
+      self.gap_counter = 0
+
+    if self.gap_counter == CRUISE_LONG_PRESS * (1.5 if self.is_gm else 1) and frogpilot_toggles.experimental_mode_via_distance or self.traffic_mode_changed:
+      if frogpilot_toggles.conditional_experimental_mode:
+        conditional_status = params_memory.get_int("CEStatus")
+        override_value = 0 if conditional_status in {1, 2, 3, 4, 5, 6} else 1 if conditional_status >= 7 else 2
+        params_memory.put_int("CEStatus", override_value)
+      else:
+        experimental_mode = params.get_bool("ExperimentalMode")
+        params.put_bool("ExperimentalMode", not experimental_mode)
+      self.traffic_mode_changed = False
+
+    if self.gap_counter == CRUISE_LONG_PRESS * 5:
+      self.traffic_mode_active = not self.traffic_mode_active
+      self.traffic_mode_changed = frogpilot_toggles.experimental_mode_via_distance
+
+    self.prev_distance_button = distance_button
+    return self.gap_counter >= CRUISE_LONG_PRESS
 
 class RadarInterfaceBase(ABC):
   def __init__(self, CP: structs.CarParams):
@@ -442,9 +569,15 @@ class CarStateBase(ABC):
 
     self.softHoldActive = 0
 
-  @abstractmethod
-  def update(self, can_parsers) -> structs.CarState:
-    pass
+
+
+
+
+    # FrogPilot variables
+    self.cruise_decreased = False
+    self.cruise_increased = False
+    self.distance_button = False
+    self.lkas_enabled = False
 
   def update_speed_kf(self, v_ego_raw):
     if abs(v_ego_raw - self.v_ego_kf.x[0][0]) > 2.0:  # Prevent large accelerations when car starts at non zero speed

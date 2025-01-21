@@ -1,21 +1,26 @@
+from cereal import car, custom
 from panda import Panda
 from panda import uds
 from opendbc.car import Bus, structs, get_safety_config
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, TSS2_CAR, RADAR_ACC_CAR, NO_DSU_CAR, \
-                                                  MIN_ACC_SPEED, EPS_SCALE, UNSUPPORTED_DSU_CAR, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR
+                                                  MIN_ACC_SPEED, PEDAL_TRANSITION, EPS_SCALE, UNSUPPORTED_DSU_CAR, NO_STOP_TIMER_CAR, ANGLE_CONTROL_CAR, STOP_AND_GO_CAR
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 
-SteerControlType = structs.CarParams.SteerControlType
+from openpilot.selfdrive.frogpilot.frogpilot_variables import params
 
+ButtonType = car.CarState.ButtonEvent.Type
+FrogPilotButtonType = custom.FrogPilotCarState.ButtonEvent.Type
+EventName = car.CarEvent.EventName
+SteerControlType = car.CarParams.SteerControlType
 
 class CarInterface(CarInterfaceBase):
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
-    return CarControllerParams(CP).ACCEL_MIN, CarControllerParams(CP).ACCEL_MAX
+    return CarControllerParams(CP)(CP).ACCEL_MIN, CarControllerParams(CP)(CP).ACCEL_MAX
 
   @staticmethod
-  def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, experimental_long, docs) -> structs.CarParams:
+  def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs) -> structs.CarParams:
     ret.carName = "toyota"
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.toyota)]
     ret.safetyConfigs[0].safetyParam = EPS_SCALE[candidate]
@@ -23,6 +28,10 @@ class CarInterface(CarInterfaceBase):
     # BRAKE_MODULE is on a different address for these cars
     if DBC[candidate][Bus.pt] == "toyota_new_mc_pt_generated":
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_ALT_BRAKE
+
+    if ret.flags & ToyotaFlags.SECOC.value:
+      ret.secOcRequired = True
+      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_SECOC
 
     if ret.flags & ToyotaFlags.SECOC.value:
       ret.secOcRequired = True
@@ -41,6 +50,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
       ret.steerLimitTimer = 0.4
 
+    ret.stoppingControl = False  # Toyota starts braking more when it thinks you want to stop
     stop_and_go = candidate in TSS2_CAR
 
     # In TSS2 cars, the camera does long control
@@ -50,24 +60,26 @@ class CarInterface(CarInterfaceBase):
     if Ecu.hybrid in found_ecus:
       ret.flags |= ToyotaFlags.HYBRID.value
 
+    if Ecu.hybrid in found_ecus:
+      ret.flags |= ToyotaFlags.HYBRID.value
+
+    if Ecu.hybrid in found_ecus:
+      ret.flags |= ToyotaFlags.HYBRID.value
+
     if candidate == CAR.TOYOTA_PRIUS:
-      stop_and_go = True
       # Only give steer angle deadzone to for bad angle sensor prius
       for fw in car_fw:
         if fw.ecu == "eps" and not fw.fwVersion == b'8965B47060\x00\x00\x00\x00\x00\x00':
           ret.steerActuatorDelay = 0.25
           CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.2)
 
+      if 0x23 in fingerprint[0]:  # Detect if ZSS is present
+        ret.flags |= ToyotaFlags.ZSS.value
+
     elif candidate in (CAR.LEXUS_RX, CAR.LEXUS_RX_TSS2):
-      stop_and_go = True
       ret.wheelSpeedFactor = 1.035
 
-    elif candidate in (CAR.TOYOTA_AVALON, CAR.TOYOTA_AVALON_2019, CAR.TOYOTA_AVALON_TSS2):
-      # starting from 2019, all Avalon variants have stop and go
-      # https://engage.toyota.com/static/images/toyota_safety_sense/TSS_Applicability_Chart.pdf
-      stop_and_go = candidate != CAR.TOYOTA_AVALON
-
-    elif candidate in (CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_RAV4_TSS2_2023, CAR.TOYOTA_RAV4_PRIME, CAR.TOYOTA_SIENNA_4TH_GEN):
+    elif candidate in (CAR.TOYOTA_RAV4_TSS2, CAR.TOYOTA_RAV4_TSS2_2022, CAR.TOYOTA_RAV4_TSS2_2023, CAR.TOYOTA_RAV4_PRIME, CAR.TOYOTA_SIENNA_4TH_GEN, CAR.TOYOTA_RAV4_PRIME, CAR.TOYOTA_SIENNA_4TH_GEN):
       ret.lateralTuning.init('pid')
       ret.lateralTuning.pid.kiBP = [0.0]
       ret.lateralTuning.pid.kpBP = [0.0]
@@ -120,20 +132,36 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & ToyotaFlags.SECOC.value:
       ret.openpilotLongitudinalControl = False
     else:
+  
+    if ret.flags & ToyotaFlags.SECOC.value:
+      ret.openpilotLongitudinalControl = False
+    else:
       ret.openpilotLongitudinalControl = ret.enableDsu or \
         candidate in (TSS2_CAR - RADAR_ACC_CAR) or \
         bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value)
 
+    ret.openpilotLongitudinalControl &= not disable_openpilot_long
+
     ret.autoResumeSng = ret.openpilotLongitudinalControl and candidate in NO_STOP_TIMER_CAR
+    ret.enableGasInterceptor = 0x201 in fingerprint[0] and ret.openpilotLongitudinalControl
 
     if not ret.openpilotLongitudinalControl:
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_STOCK_LONGITUDINAL
 
+    if ret.enableGasInterceptor:
+      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_TOYOTA_GAS_INTERCEPTOR
+
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter.
-    ret.minEnableSpeed = -1. if stop_and_go else MIN_ACC_SPEED
+    ret.minEnableSpeed = -1. if (candidate in STOP_AND_GO_CAR or ret.enableGasInterceptor) else MIN_ACC_SPEED
 
-    if candidate in TSS2_CAR:
+    tune = ret.longitudinalTuning
+    if ret.enableGasInterceptor:
+      tune.kpBP = [0., 5., 20.]
+      tune.kpV = [1.3, 1.0, 0.7]
+      tune.kiBP = [0., 5., 12., 20., 27.]
+      tune.kiV = [.35, .23, .20, .17, .1]
+    elif candidate in TSS2_CAR:
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
       ret.vEgoStopping = 0.25
@@ -152,3 +180,42 @@ class CarInterface(CarInterfaceBase):
     if CP.flags & ToyotaFlags.DISABLE_RADAR.value:
       communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, uds.CONTROL_TYPE.ENABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
       disable_ecu(can_recv, can_send, bus=0, addr=0x750, sub_addr=0xf, com_cont_req=communication_control)
+      disable_ecu(logcan, sendcan, bus=0, addr=0x750, sub_addr=0xf, com_cont_req=communication_control)
+
+  # returns a car.CarState
+  def _update(self, c, frogpilot_toggles):
+    ret, fp_ret = self.CS.update(self.cp, self.cp_cam, c, frogpilot_toggles)
+
+    if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR) or (self.CP.flags & ToyotaFlags.SMART_DSU and not self.CP.flags & ToyotaFlags.RADAR_CAN_FILTER):
+      ret.buttonEvents = [
+        *create_button_events(self.CS.cruise_decreased, self.CS.cruise_decreased_previously, {1: ButtonType.decelCruise}),
+        *create_button_events(self.CS.cruise_increased, self.CS.cruise_increased_previously, {1: ButtonType.accelCruise}),
+        *create_button_events(self.CS.distance_button, self.CS.prev_distance_button, {1: ButtonType.gapAdjustCruise}),
+        *create_button_events(self.CS.lkas_enabled, self.CS.lkas_previously_enabled, {1: FrogPilotButtonType.lkas}),
+      ]
+
+    # events
+    events = self.create_common_events(ret)
+
+    # Lane Tracing Assist control is unavailable (EPS_STATUS->LTA_STATE=0) until
+    # the more accurate angle sensor signal is initialized
+    if self.CP.steerControlType == SteerControlType.angle and not self.CS.accurate_steer_angle_seen:
+      events.add(EventName.vehicleSensorsInvalid)
+
+    if self.CP.openpilotLongitudinalControl:
+      if ret.cruiseState.standstill and not ret.brakePressed and not self.CP.enableGasInterceptor:
+        events.add(EventName.resumeRequired)
+      if self.CS.low_speed_lockout:
+        events.add(EventName.lowSpeedLockout)
+      if ret.vEgo < self.CP.minEnableSpeed:
+        events.add(EventName.belowEngageSpeed)
+        if c.actuators.accel > 0.3:
+          # some margin on the actuator to not false trigger cancellation while stopping
+          events.add(EventName.speedTooLow)
+        if ret.vEgo < 0.001:
+          # while in standstill, send a user alert
+          events.add(EventName.manualRestart)
+
+    ret.events = events.to_msg()
+
+    return ret, fp_ret

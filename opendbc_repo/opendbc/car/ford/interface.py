@@ -1,3 +1,4 @@
+from cereal import car, custom
 from panda import Panda
 from opendbc.car.common.numpy_fast import interp
 from opendbc.car import Bus, get_safety_config, structs
@@ -6,7 +7,10 @@ from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import CarControllerParams, DBC, Ecu, FordFlags, RADAR
 from opendbc.car.interfaces import CarInterfaceBase
 
-TransmissionType = structs.CarParams.TransmissionType
+ButtonType = car.CarState.ButtonEvent.Type
+FrogPilotButtonType = custom.FrogPilotCarState.ButtonEvent.Type
+TransmissionType = car.CarParams.TransmissionType
+GearShifter = car.CarState.GearShifter
 
 
 class CarInterface(CarInterfaceBase):
@@ -19,9 +23,9 @@ class CarInterface(CarInterfaceBase):
     return CarControllerParams.ACCEL_MIN, interp(current_speed, ACCEL_MAX_BP, ACCEL_MAX_VALS)
 
   @staticmethod
-  def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, experimental_long, docs) -> structs.CarParams:
+  def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs) -> structs.CarParams:
     ret.carName = "ford"
-    ret.dashcamOnly = bool(ret.flags & FordFlags.CANFD)
+    ret.dashcamOnly = False
 
     ret.radarUnavailable = Bus.radar not in DBC[candidate]
     ret.steerControlType = structs.CarParams.SteerControlType.angle
@@ -81,3 +85,19 @@ class CarInterface(CarInterfaceBase):
     ret.autoResumeSng = ret.minEnableSpeed == -1.
     ret.centerToFront = ret.wheelbase * 0.44
     return ret
+
+  def _update(self, c, frogpilot_toggles):
+    ret, fp_ret = self.CS.update(self.cp, self.cp_cam, frogpilot_toggles)
+
+    ret.buttonEvents = [
+      *create_button_events(self.CS.distance_button, self.CS.prev_distance_button, {1: ButtonType.gapAdjustCruise}),
+      *create_button_events(self.CS.lkas_enabled, self.CS.lkas_previously_enabled, {1: FrogPilotButtonType.lkas}),
+    ]
+
+    events = self.create_common_events(ret, extra_gears=[GearShifter.manumatic])
+    if not self.CS.vehicle_sensors_valid:
+      events.add(car.CarEvent.EventName.vehicleSensorsInvalid)
+
+    ret.events = events.to_msg()
+
+    return ret, fp_ret

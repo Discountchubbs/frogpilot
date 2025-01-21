@@ -60,6 +60,7 @@ public:
   void setTetheringEnabled(bool enabled);
   bool isTetheringEnabled();
   void changeTetheringPassword(const QString &newPassword);
+  QString getIp4Address();
   QString getTetheringPassword();
 
 private:
@@ -74,7 +75,6 @@ private:
 
   QString getAdapter(const uint = NM_DEVICE_TYPE_WIFI);
   uint getAdapterType(const QDBusObjectPath &path);
-  QString getIp4Address();
   void deactivateConnectionBySsid(const QString &ssid);
   void deactivateConnection(const QDBusObjectPath &path);
   QVector<QDBusObjectPath> getActiveConnections();

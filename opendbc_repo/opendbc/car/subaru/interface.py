@@ -1,21 +1,28 @@
+from cereal import car, custom
 from panda import Panda
-from opendbc.car import get_safety_config, structs
+from opendbc.car import create_button_events, get_safety_config, structs
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.subaru.values import CAR, GLOBAL_ES_ADDR, SubaruFlags
 
+from openpilot.selfdrive.frogpilot.frogpilot_variables import get_frogpilot_toggles
+
+FrogPilotButtonType = custom.FrogPilotCarState.ButtonEvent.Type
 
 class CarInterface(CarInterfaceBase):
 
   @staticmethod
-  def _get_params(ret: structs.CarParams, candidate: CAR, fingerprint, car_fw, experimental_long, docs) -> structs.CarParams:
+  def _get_params(ret: structs.CarParams, candidate: CAR, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs) -> structs.CarParams:
+    # FrogPilot variables
+    crosstrek_torque_increase = get_frogpilot_toggles().crosstrek_torque
+
     ret.carName = "subaru"
     ret.radarUnavailable = True
     # for HYBRID CARS to be upstreamed, we need:
     # - replacement for ES_Distance so we can cancel the cruise control
     # - to find the Cruise_Activated bit from the car
     # - proper panda safety setup (use the correct cruise_activated bit, throttle from Throttle_Hybrid, etc)
-    ret.dashcamOnly = bool(ret.flags & (SubaruFlags.PREGLOBAL | SubaruFlags.LKAS_ANGLE | SubaruFlags.HYBRID))
+    ret.dashcamOnly = bool(ret.flags & (SubaruFlags.LKAS_ANGLE | SubaruFlags.HYBRID))
     ret.autoResumeSng = False
 
     # Detect infotainment message sent from the camera
@@ -49,9 +56,9 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.SUBARU_IMPREZA:
       ret.steerActuatorDelay = 0.4  # end-to-end angle controller
       ret.lateralTuning.init('pid')
-      ret.lateralTuning.pid.kf = 0.00005
+      ret.lateralTuning.pid.kf = 0.00003333 if crosstrek_torque_increase else 0.00005
       ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[0., 20.], [0., 20.]]
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.2, 0.3], [0.02, 0.03]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.133, 0.2], [0.0133, 0.02]] if crosstrek_torque_increase else [[0.2, 0.3], [0.02, 0.03]]
 
     elif candidate == CAR.SUBARU_IMPREZA_2020:
       ret.lateralTuning.init('pid')
@@ -93,6 +100,19 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_SUBARU_LONG
 
     return ret
+
+  # returns a car.CarState
+  def _update(self, c, frogpilot_toggles):
+
+    ret, fp_ret = self.CS.update(self.cp, self.cp_cam, self.cp_body, frogpilot_toggles)
+
+    ret.buttonEvents = [
+      *create_button_events(self.CS.lkas_enabled, self.CS.lkas_previously_enabled, {1: FrogPilotButtonType.lkas}),
+    ]
+
+    ret.events = self.create_common_events(ret).to_msg()
+
+    return ret, fp_ret
 
   @staticmethod
   def init(CP, can_recv, can_send):

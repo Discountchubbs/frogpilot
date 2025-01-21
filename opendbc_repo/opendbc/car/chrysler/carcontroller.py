@@ -1,7 +1,7 @@
 from opendbc.can.packer import CANPacker
 from opendbc.car import Bus, DT_CTRL, apply_meas_steer_torque_limits
 from opendbc.car.chrysler import chryslercan
-from opendbc.car.chrysler.values import RAM_CARS, CarControllerParams, ChryslerFlags
+from opendbc.car.chrysler.values import RAM_CARS, RAM_DT, CarControllerParams, ChryslerFlags
 from opendbc.car.interfaces import CarControllerBase
 
 
@@ -18,7 +18,7 @@ class CarController(CarControllerBase):
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.params = CarControllerParams(CP)
 
-  def update(self, CC, CS, now_nanos):
+  def update(self, CC, CS, now_nanos, frogpilot_toggles):
     can_sends = []
 
     lkas_active = CC.latActive and self.lkas_control_bit_prev
@@ -30,18 +30,18 @@ class CarController(CarControllerBase):
       # ACC cancellation
       if CC.cruiseControl.cancel:
         self.last_button_frame = self.frame
-        can_sends.append(chryslercan.create_cruise_buttons(self.packer, CS.button_counter + 1, das_bus, cancel=True))
+        can_sends.append(chryslercan.create_cruise_buttons(self.packer, self.CP, CS.button_counter + 1, das_bus, cancel=True))
 
       # ACC resume from standstill
       elif CC.cruiseControl.resume:
         self.last_button_frame = self.frame
-        can_sends.append(chryslercan.create_cruise_buttons(self.packer, CS.button_counter + 1, das_bus, resume=True))
+        can_sends.append(chryslercan.create_cruise_buttons(self.packer, self.CP, CS.button_counter + 1, das_bus, resume=True))
 
     # HUD alerts
     if self.frame % 25 == 0:
       if CS.lkas_car_model != -1:
         can_sends.append(chryslercan.create_lkas_hud(self.packer, self.CP, lkas_active, CC.hudControl.visualAlert,
-                                                     self.hud_count, CS.lkas_car_model, CS.auto_high_beam))
+                                                     self.hud_count, CS.lkas_car_model, CS.auto_high_beam, CC.latActive))
         self.hud_count += 1
 
     # steering
@@ -49,7 +49,12 @@ class CarController(CarControllerBase):
 
       # TODO: can we make this more sane? why is it different for all the cars?
       lkas_control_bit = self.lkas_control_bit_prev
-      if CS.out.vEgo > self.CP.minSteerSpeed:
+      if self.CP.carFingerprint in RAM_DT:
+        if self.CP.minEnableSpeed <= CS.out.vEgo <= self.CP.minEnableSpeed + 0.5:
+          lkas_control_bit = True
+        if (self.CP.minEnableSpeed >= 14.5) and (CS.out.gearShifter != 2):
+          lkas_control_bit = False
+      elif CS.out.vEgo > self.CP.minSteerSpeed:
         lkas_control_bit = True
       elif self.CP.flags & ChryslerFlags.HIGHER_MIN_STEERING_SPEED:
         if CS.out.vEgo < (self.CP.minSteerSpeed - 3.0):

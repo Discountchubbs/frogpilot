@@ -6,6 +6,8 @@ from opendbc.car.ford.values import CarControllerParams, FordFlags
 from opendbc.car.common.numpy_fast import clip, interp
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
 
+from openpilot.selfdrive.frogpilot.controls.lib.frogpilot_acceleration import get_max_allowed_accel
+
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 
@@ -45,7 +47,7 @@ class CarController(CarControllerBase):
     self.lead_distance_bars_last = None
     self.distance_bar_frame = 0
 
-  def update(self, CC, CS, now_nanos):
+  def update(self, CC, CS, now_nanos, frogpilot_toggles):
     can_sends = []
 
     actuators = CC.actuators
@@ -73,6 +75,13 @@ class CarController(CarControllerBase):
       if CC.latActive:
         # apply rate limits, curvature error limit, and clip to signal range
         current_curvature = -CS.out.yawRate / max(CS.out.vEgoRaw, 0.1)
+        # PFEIFER - FSH {{
+        # Ignore limits while overriding, this prevents pull when releasing the wheel. This will cause messages to be
+        # blocked by panda safety, usually while the driver is overriding and limited to at most 1 message while the
+        # driver is not overriding.
+        if CS.out.steeringPressed:
+          self.apply_curvature_last = actuators.curvature
+        # }} PFEIFER - FSH
         apply_curvature = apply_ford_curvature_limits(actuators.curvature, self.apply_curvature_last, current_curvature, CS.out.vEgoRaw)
       else:
         apply_curvature = 0.
@@ -115,6 +124,11 @@ class CarController(CarControllerBase):
       accel = clip(accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)
 
       # Both gas and accel are in m/s^2, accel is used solely for braking
+      if frogpilot_toggles.sport_plus:
+        accel = clip(actuators.accel, CarControllerParams.ACCEL_MIN, min(frogpilot_toggles.max_desired_acceleration, get_max_allowed_accel(CS.out.vEgo)))
+      else:
+        accel = clip(actuators.accel, CarControllerParams.ACCEL_MIN, min(frogpilot_toggles.max_desired_acceleration, CarControllerParams.ACCEL_MAX))
+      gas = accel
       if not CC.longActive or gas < CarControllerParams.MIN_GAS:
         gas = CarControllerParams.INACTIVE_GAS
 

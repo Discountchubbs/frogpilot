@@ -1,13 +1,16 @@
+from cereal import car, custom
 from opendbc.can.parser import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.body.values import DBC
 
+STARTUP_TICKS = 100
 
 class CarState(CarStateBase):
-  def update(self, can_parsers) -> structs.CarState:
+  def update(self, can_parsers, frogpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.main]
     ret = structs.CarState()
+    fp_ret = custom.FrogPilotCarState.new_message()
 
     ret.wheelSpeeds.fl = cp.vl['MOTORS_DATA']['SPEED_L']
     ret.wheelSpeeds.fr = cp.vl['MOTORS_DATA']['SPEED_R']
@@ -28,7 +31,7 @@ class CarState(CarStateBase):
     ret.cruiseState.enabled = True
     ret.cruiseState.available = True
 
-    return ret
+    return ret, fp_ret
 
   @staticmethod
   def get_can_parsers(CP):

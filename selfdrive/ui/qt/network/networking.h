@@ -7,6 +7,7 @@
 #include "selfdrive/ui/qt/widgets/input.h"
 #include "selfdrive/ui/qt/widgets/ssh_keys.h"
 #include "selfdrive/ui/qt/widgets/toggle.h"
+#include "selfdrive/ui/ui.h"
 
 class WifiItem : public QWidget {
   Q_OBJECT
@@ -46,6 +47,9 @@ private:
   ListWidget *wifi_list_widget = nullptr;
   std::vector<WifiItem*> wifi_items;
 
+  // FrogPilot widgets
+  void updateState(const UIState &s);
+
 signals:
   void connectToNetwork(const Network n);
 
@@ -61,7 +65,7 @@ public:
 
 private:
   LabelControl* ipLabel;
-  ToggleControl* tetheringToggle;
+  ButtonParamControl* tetheringToggle;
   ToggleControl* roamingToggle;
   ButtonControl* editApnButton;
   ButtonControl* hiddenNetworkButton;
@@ -74,7 +78,7 @@ signals:
   void requestWifiScreen();
 
 public slots:
-  void toggleTethering(bool enabled);
+  void toggleTethering(int id);
   void refresh();
 };
 

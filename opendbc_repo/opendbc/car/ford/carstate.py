@@ -1,3 +1,4 @@
+from cereal import car, custom
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from opendbc.car import Bus, create_button_events, structs
@@ -22,9 +23,10 @@ class CarState(CarStateBase):
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
-    cp_cam = can_parsers[Bus.cam]
+    cp_cam, frogpilot_toggles = can_parsers[Bus.cam]
 
     ret = structs.CarState()
+    fp_ret = custom.FrogPilotCarState.new_message()
 
     # Occasionally on startup, the ABS module recalibrates the steering pinion offset, so we need to block engagement
     # The vehicle usually recovers out of this state within a minute of normal driving
@@ -112,7 +114,13 @@ class CarState(CarStateBase):
 
     ret.buttonEvents = create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
-    return ret
+    ret.buttonEvents = create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
+    # FrogPilot CarState functions
+    self.lkas_previously_enabled = self.lkas_enabled
+    self.lkas_enabled = ret.genericToggle
+
+    return ret, fp_ret
 
   @staticmethod
   def get_can_parsers(CP):

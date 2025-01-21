@@ -1,3 +1,4 @@
+from cereal import car, custom
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from opendbc.car import Bus, create_button_events, structs
@@ -24,9 +25,10 @@ class CarState(CarStateBase):
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
-    cp_cam = can_parsers[Bus.cam]
+    cp_cam, frogpilot_toggles = can_parsers[Bus.cam]
 
     ret = structs.CarState()
+    fp_ret = custom.FrogPilotCarState.new_message()
 
     prev_distance_button = self.distance_button
     self.distance_button = cp.vl["CRZ_BTNS"]["DISTANCE_LESS"]
@@ -120,7 +122,14 @@ class CarState(CarStateBase):
     # TODO: add button types for inc and dec
     ret.buttonEvents = create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
-    return ret
+    # TODO: add button types for inc and dec
+    ret.buttonEvents = create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
+    # FrogPilot CarState functions
+    self.lkas_previously_enabled = self.lkas_enabled
+    self.lkas_enabled = not self.lkas_disabled
+
+    return ret, fp_ret
 
   @staticmethod
   def get_can_parsers(CP):

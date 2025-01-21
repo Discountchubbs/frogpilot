@@ -1,4 +1,4 @@
-﻿from dataclasses import dataclass, field
+from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
 from opendbc.car.common.numpy_fast import interp
@@ -33,19 +33,34 @@ class CarControllerParams:
   # Our controller should still keep the 2 second average above
   # -3.5 m/s^2 as per planner limits
   ACCEL_MAX = 2.  # m/s^2
+  ACCEL_MAX_PLUS = 4.  # m/s^2
   ACCEL_MIN = -4.  # m/s^2
 
   def __init__(self, CP):
     # Gas/brake lookups
-    self.ZERO_GAS = 2048  # Coasting
+    self.ZERO_GAS = 6144  # Coasting
     self.MAX_BRAKE = 400  # ~ -4.0 m/s^2 with regen
 
     if CP.carFingerprint in CAMERA_ACC_CAR and CP.carFingerprint not in CC_ONLY_CAR:
+      self.MAX_GAS = 7496
+      self.MAX_GAS_PLUS = 8848
+      self.MAX_ACC_REGEN = 5610
+      self.INACTIVE_REGEN = 5650
+      # Camera ACC vehicles have no regen while enabled.
+      # Camera transitions to MAX_ACC_REGEN from ZERO_GAS and uses friction brakes instantly
+      self.max_regen_acceleration = 0.
+
+    elif CP.carFingerprint in SDGM_CAR:
+      self.MAX_GAS = 7496
+      self.MAX_GAS_PLUS = 7496
+      self.MAX_ACC_REGEN = 5610
+      self.INACTIVE_REGEN = 5650
+      self.max_regen_acceleration = 0.
+
+    elif CP.carFingerprint in SDGM_CAR:
       self.MAX_GAS = 3400
       self.MAX_ACC_REGEN = 1514
       self.INACTIVE_REGEN = 1554
-      # Camera ACC vehicles have no regen while enabled.
-      # Camera transitions to MAX_ACC_REGEN from ZERO_GAS and uses friction brakes instantly
       max_regen_acceleration = 0.
 
     elif CP.carFingerprint in SDGM_CAR:
@@ -55,30 +70,34 @@ class CarControllerParams:
       max_regen_acceleration = 0.
 
     else:
-      self.MAX_GAS = 3072  # Safety limit, not ACC max. Stock ACC >4096 from standstill.
-      self.MAX_ACC_REGEN = 1404  # Max ACC regen is slightly less than max paddle regen
-      self.INACTIVE_REGEN = 1404
+      self.MAX_GAS = 7168  # Safety limit, not ACC max. Stock ACC >8192 from standstill.
+      self.MAX_GAS_PLUS = 8191 # 8292 uses new bit, possible but not tested. Matches Twilsonco tw-main max
+      self.MAX_ACC_REGEN = 5500  # Max ACC regen is slightly less than max paddle regen
+      self.INACTIVE_REGEN = 5500
       # ICE has much less engine braking force compared to regen in EVs,
       # lower threshold removes some braking deadzone
-      max_regen_acceleration = -1. if CP.carFingerprint in EV_CAR else -0.1
+      self.max_regen_acceleration = -1. if CP.carFingerprint in EV_CAR else -0.1
 
-    self.GAS_LOOKUP_BP = [max_regen_acceleration, 0., self.ACCEL_MAX]
+    self.GAS_LOOKUP_BP = [self.max_regen_acceleration, 0., self.ACCEL_MAX]
+    self.GAS_LOOKUP_BP_PLUS = [self.max_regen_acceleration, 0., self.ACCEL_MAX_PLUS]
     self.GAS_LOOKUP_V = [self.MAX_ACC_REGEN, self.ZERO_GAS, self.MAX_GAS]
+    self.GAS_LOOKUP_V_PLUS = [self.MAX_ACC_REGEN, self.ZERO_GAS, self.MAX_GAS_PLUS]
 
-    self.BRAKE_LOOKUP_BP = [self.ACCEL_MIN, max_regen_acceleration]
+    self.BRAKE_LOOKUP_BP = [self.ACCEL_MIN, self.max_regen_acceleration]
     self.BRAKE_LOOKUP_V = [self.MAX_BRAKE, 0.]
 
   # determined by letting Volt regen to a stop in L gear from 89mph,
   # and by letting off gas and allowing car to creep, for determining
   # the positive threshold values at very low speed
   EV_GAS_BRAKE_THRESHOLD_BP = [1.29, 1.52, 1.55, 1.6, 1.7, 1.8, 2.0, 2.2, 2.5, 5.52, 9.6, 20.5, 23.5, 35.0] # [m/s]
-  EV_GAS_BRAKE_THRESHOLD_V = [0.0, -0.14, -0.16, -0.18, -0.215, -0.255, -0.32, -0.41, -0.5, -0.72, -0.905, -1.14, -1.16, -1.175] # [m/s^s]
+  EV_GAS_BRAKE_THRESHOLD_V = [0.0, -0.14, -0.16, -0.18, -0.215, -0.255, -0.32, -0.41, -0.5, -0.72, -0.895, -1.125, -1.145, -1.16] # [m/s^s]
 
   def update_ev_gas_brake_threshold(self, v_ego):
     gas_brake_threshold = interp(v_ego, self.EV_GAS_BRAKE_THRESHOLD_BP, self.EV_GAS_BRAKE_THRESHOLD_V)
+    self.GAS_LOOKUP_BP_PLUS = [self.max_regen_acceleration, 0., self.ACCEL_MAX_PLUS]
     self.EV_GAS_LOOKUP_BP = [gas_brake_threshold, max(0., gas_brake_threshold), self.ACCEL_MAX]
+    self.EV_GAS_LOOKUP_BP_PLUS = [gas_brake_threshold, max(0., gas_brake_threshold), self.ACCEL_MAX_PLUS]
     self.EV_BRAKE_LOOKUP_BP = [self.ACCEL_MIN, gas_brake_threshold]
-
 
 @dataclass
 class GMCarDocs(CarDocs):
@@ -131,6 +150,7 @@ class CAR(Platforms):
   CHEVROLET_VOLT = GMASCMPlatformConfig(
     [GMCarDocs("Chevrolet Volt 2017-18", min_enable_speed=0, video_link="https://youtu.be/QeMCN_4TFfQ")],
     GMCarSpecs(mass=1607, wheelbase=2.69, steerRatio=17.7, centerToFrontRatio=0.45, tireStiffnessFactor=0.469, minEnableSpeed=-1),
+    dbc_dict=dbc_dict('gm_global_a_powertrain_volt', 'gm_global_a_object', chassis_dbc='gm_global_a_chassis')
   )
   CADILLAC_ATS = GMASCMPlatformConfig(
     [GMCarDocs("Cadillac ATS Premium Performance 2018")],
@@ -258,6 +278,67 @@ class CAR(Platforms):
   GMC_YUKON = GMPlatformConfig(
     [GMCarDocs("GMC Yukon 2019-20", "Adaptive Cruise Control (ACC) & LKAS")],
     GMCarSpecs(mass=2490, wheelbase=2.94, steerRatio=17.3, centerToFrontRatio=0.5, tireStiffnessFactor=1.0),
+  )
+  # Separate car def is required when there is no ASCM
+  # (for now) unless there is a way to detect it when it has been unplugged...
+  CHEVROLET_VOLT_CC = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Volt 2017-18 - No-ACC", min_enable_speed=0)],
+    CHEVROLET_VOLT.specs,
+  )
+  CHEVROLET_BOLT_CC = GMPlatformConfig(
+    [
+      GMCarDocs("Chevrolet Bolt EUV 2022-23 - No-ACC"),
+      GMCarDocs("Chevrolet Bolt EV 2017-23 - No-ACC"),
+    ],
+    CHEVROLET_BOLT_EUV.specs,
+  )
+  CHEVROLET_EQUINOX_CC = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Equinox 2019-22 - No-ACC")],
+    CHEVROLET_EQUINOX.specs,
+  )
+  CHEVROLET_SUBURBAN = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Suburban Premier 2016-2020")],
+    CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
+  )
+  CHEVROLET_SUBURBAN_CC = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Suburban Premier 2016-2020 - No-ACC")],
+    CHEVROLET_SUBURBAN.specs,
+  )
+  GMC_YUKON_CC = GMPlatformConfig(
+    [GMCarDocs("GMC Yukon No ACC")],
+    CarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4),
+  )
+  CADILLAC_CT6_CC = GMPlatformConfig(
+    [GMCarDocs("Cadillac CT6 No ACC")],
+    CarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4),
+  )
+  CHEVROLET_TRAILBLAZER_CC = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Trailblazer 2021-22")],
+    CHEVROLET_TRAILBLAZER.specs,
+  )
+  CADILLAC_XT4 = GMPlatformConfig(
+    [GMCarDocs("Cadillac XT4 2023", "Driver Assist Package")],
+    CarSpecs(mass=1660, wheelbase=2.78, steerRatio=14.4, centerToFrontRatio=0.4),
+  )
+  CADILLAC_XT5_CC = GMPlatformConfig(
+    [GMCarDocs("Cadillac XT5 No ACC")],
+    CarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5),
+  )
+  CHEVROLET_TRAVERSE = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Traverse 2023", "Driver Assist Package")],
+    CarSpecs(mass=1955, wheelbase=3.07, steerRatio=17.9, centerToFrontRatio=0.4),
+  )
+  BUICK_BABYENCLAVE = GMPlatformConfig(
+    [GMCarDocs("Buick Baby Enclave 2020-23", "Driver Assist Package")],
+    CarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.0, centerToFrontRatio=0.5),
+  )
+  CHEVROLET_MALIBU_CC = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Malibu 2023 No ACC")],
+    CarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4),
+  )
+  CHEVROLET_TRAX = GMPlatformConfig(
+    [GMCarDocs("Chevrolet TRAX 2024")],
+    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.4, centerToFrontRatio=0.4),
   )
 
 
