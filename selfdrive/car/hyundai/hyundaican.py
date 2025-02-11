@@ -170,8 +170,8 @@ def create_acc_commands(packer, enabled, accel, jerk_upper, jerk_lower, cb_upper
   commands.append(packer.make_can_msg("SCC12", 0, scc12_values))
 
   scc14_values = {
-    "ComfortBandUpper": cb_upper,
-    "ComfortBandLower": cb_lower,
+    "ComfortBandUpper": 0.0, #cb_upper,
+    "ComfortBandLower": 0.0, #cb_lower,
     "JerkUpperLimit": jerk_upper,
     "JerkLowerLimit": jerk_lower,
     "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
